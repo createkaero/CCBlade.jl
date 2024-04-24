@@ -735,7 +735,7 @@ end
 ############## Extrapolation ##################
 
 """
-    viterna(alpha, cl, cd, cr75, nalpha=50)
+    viterna(alpha, cl, cd, cr75, nalpha=50; use_ends=false)
 
 Viterna extrapolation.  Follows Viterna paper and somewhat follows NREL version of AirfoilPrep, but with some modifications for better robustness and smoothness.
 
@@ -745,31 +745,44 @@ Viterna extrapolation.  Follows Viterna paper and somewhat follows NREL version 
 - `cd::Vector{Float64}`: correspnding drag coefficients
 - `cr75::Float64`: chord/Rtip at 75% Rtip
 - `nalpha::Int64`: number of discrete points (angles of attack) to include in extrapolation
+- `use_ends::Bool`: use first and last values rather than cl_min and cl_max
 
 **Returns**
 - `alpha::Vector{Float64}`: angle of attack from -pi to pi
 - `cl::Vector{Float64}`: correspnding extrapolated lift coefficients
 - `cd::Vector{Float64}`: correspnding extrapolated drag coefficients
 """
-function viterna(alpha, cl, cd, cr75, nalpha=50)
+function viterna(alpha, cl, cd, cr75, nalpha=50; use_ends=false)
 
     # estimate cdmax
     AR = 1.0 / cr75  
     cdmaxAR = 1.11 + 0.018*AR
     cdmax = max(maximum(cd), cdmaxAR)
 
-    # find clmax
-    i_ps = argmax(cl)  # positive stall
-    cl_ps = cl[i_ps]
-    cd_ps = cd[i_ps]
-    a_ps = alpha[i_ps]
+    if use_ends
+        # Values at highest alpha
+        cl_ps = cl[end]
+        cd_ps = cd[end]
+        a_ps  = alpha[end]
 
-    # and clmin
-    i_bs = alpha .< a_ps  # before stall
-    i_ns = argmin(cl[i_bs])  # negative stall
-    cl_ns = cl[i_bs][i_ns]
-    cd_ns = cd[i_bs][i_ns]
-    a_ns = alpha[i_bs][i_ns]
+        # Values at lowest alpha
+        cl_ns = cl[1]
+        cd_ns = cd[1]
+        a_ns  = alpha[1]
+    else 
+        # find clmax
+        i_ps = argmax(cl)  # positive stall
+        cl_ps = cl[i_ps]
+        cd_ps = cd[i_ps]
+        a_ps = alpha[i_ps]
+        
+        # and clmin
+        i_bs = alpha .< a_ps  # before stall
+        i_ns = argmin(cl[i_bs])  # negative stall
+        cl_ns = cl[i_bs][i_ns]
+        cd_ns = cd[i_bs][i_ns]
+        a_ns = alpha[i_bs][i_ns]
+    end
 
     # coefficients in method
     B1pos = cdmax

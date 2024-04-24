@@ -190,7 +190,7 @@ end
 """
 (private) residual function
 """
-function residual_and_outputs(phi, x, p)  #rotor, section, op)
+function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section, op)
 
     # unpack inputs
     r, chord, theta, Rhub, Rtip, Vx, Vy, rho, pitch, mu, asound = x  # variables
@@ -269,7 +269,7 @@ function residual_and_outputs(phi, x, p)  #rotor, section, op)
             return 1.0, Outputs()
         end
 
-        if k >= -2.0/3  # momentum region
+        if k >= -2.0/3 || force_momentum  # momentum region
             a = k/(1 - k)
 
         else  # empirical region. Not Buhl's correction but instead uses Buhl with F = 1 then multiplied by F.  
@@ -378,11 +378,12 @@ Solve the BEM equations for given rotor geometry and operating point.
 - `forcebackwardsearch::Bool = false`: if true, force bracket search from high `phi` values to low, otherwise let `solve` decide
 - `epsilon_everywhere::Bool = false`: if true, don't evaluate at intersections of `phi` quadrants (`pi/2`, `-pi/2`, etc.)
 - `implicitad_option=true`: if true, uses ImplicitAD to compute derivatives around solver when using AD; if false, bypasses ImplicitAD
+- `force_momentum::Bool = false`: if true, use momentum theory in vortex ring state and turbulent wake state (holds up until about Vc/Vh ≈ -1.5)
 
 **Returns**
 - `outputs::Outputs`: BEM output data including loads, induction factors, etc.
 """
-function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_everywhere=false, implicitad_option=true)
+function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_everywhere=false, implicitad_option=true, force_momentum=false)
 
     # error handling
     if typeof(section) <: AbstractVector
@@ -395,7 +396,9 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
     end
 
     # parameters
-    # npts = 10  # number of discretization points to find bracket in residual solve
+    if force_momentum
+        epsilon_everywhere = true
+    end
 
     # unpack
     Vx = op.Vx
@@ -469,7 +472,7 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
 
     # ----- solve residual function ------
     # pull out first argument
-    residual(phi, x, p) = residual_and_outputs(phi, x, p)[1]
+    residual(phi, x, p) = residual_and_outputs(phi, x, p; force_momentum)[1]
 
     # package up variables and parameters for residual
     xv = [section.r, section.chord, section.theta, rotor.Rhub, rotor.Rtip, op.Vx, op.Vy, op.rho, op.pitch, op.mu, op.asound]
@@ -510,7 +513,7 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
             else
                 phistar = solve(xv, pv)
             end
-            _, outputs = residual_and_outputs(phistar, xv, pv)
+            _, outputs = residual_and_outputs(phistar, xv, pv; force_momentum)
             return outputs
         end    
     end    
