@@ -86,7 +86,7 @@ end
 abstract type AFType end
 
 """
-    afeval(af::AFType, alpha, Re, Mach)
+    afeval(af::AFType, alpha, Re, Mach; cosYAW=1.0)
 
 Evaluate airfoil aerodynamic performance
 
@@ -95,23 +95,24 @@ Evaluate airfoil aerodynamic performance
 - `alpha::Float64`: angle of attack in radians
 - `Re::Float64`: Reynolds number
 - `Mach::Float64`: Mach number
+- `cosYAW::Float64`: cosinus of yawed flow angle
 
 **Returns**
 - `cl::Float64`: lift coefficient
 - `cd::Float64`: drag coefficient
 """
-function afeval(af::AFType, alpha, Re, Mach)
+function afeval(af::AFType, alpha, Re, Mach; cosYAW=1.0)
     @error "need to choose an AFType"
 end
 # ---------------
 
 # --- Function Type -----
-function afeval(af::Function, alpha, Re, Mach)
+function afeval(af::Function, alpha, Re, Mach; cosYAW=1.0)
     return af(alpha, Re, Mach)
 end
 # ---------------
 
-# --- Simple paramterization ------  
+# --- Simple parametrization ------  
 
 """
     SimpleAF(m, alpha0, clmax, clmin, cd0, cd2)
@@ -137,12 +138,17 @@ struct SimpleAF{TF} <: AFType
     cd2::TF
 end
 
-function afeval(af::SimpleAF, alpha, Re, Mach)
-    cl = af.m*(alpha - af.alpha0)
+function afeval(af::SimpleAF, alpha, Re, Mach; cosYAW=1.0)
+    # Lift coefficient with yawed flow correction
+    cl = af.m*(alpha*cosYAW^2 - af.alpha0)/cosYAW^2
     cl = min(cl, af.clmax)
     cl = max(cl, af.clmin)
 
-    cd = af.cd0 + af.cd2*cl^2
+    # Drag coefficient with yawed flow correction
+    cl_d = af.m*(alpha*cosYAW - af.alpha0)/cosYAW
+    cl_d = min(cl_d, af.clmax)
+    cl_d = max(cl_d, af.clmin)
+    cd   = af.cd0 + af.cd2*cl_d^2
 
     return cl, cd
 end
@@ -203,8 +209,8 @@ function AlphaAF(filename::String; radians=true)
 end
 
 
-function afeval(af::AlphaAF, alpha, Re, Mach)
-    return af.clspline(alpha), af.cdspline(alpha)
+function afeval(af::AlphaAF, alpha, Re, Mach; cosYAW=1.0)
+    return af.clspline(alpha*cosYAW^2)/cosYAW^2, af.cdspline(alpha*cosYAW)/cosYAW
 end
 
 
@@ -288,10 +294,10 @@ function AlphaReAF(filenames::Vector{String}; radians=true)
     return AlphaReAF(alpha, Re, cl, cd, info, Mach)
 end
 
-function afeval(af::AlphaReAF, alpha, Re, Mach)
+function afeval(af::AlphaReAF, alpha, Re, Mach; cosYAW=1.0)
 
-    cl = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Re, af.cl, [alpha], [Re])[1]
-    cd = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Re, af.cd, [alpha], [Re])[1]
+    cl = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Re, af.cl, [alpha*cosYAW^2], [Re])[1]/cosYAW^2
+    cd = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Re, af.cd, [alpha*cosYAW],   [Re])[1]/cosYAW
 
     return cl, cd
 end
@@ -367,10 +373,10 @@ function AlphaMachAF(filenames::Vector{String}; radians=true)
     return AlphaMachAF(alpha, Mach, cl, cd, info, Re)
 end
 
-function afeval(af::AlphaMachAF, alpha, Re, Mach)
+function afeval(af::AlphaMachAF, alpha, Re, Mach; cosYAW=1.0)
 
-    cl = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Mach, af.cl, [alpha], [Mach])[1]
-    cd = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Mach, af.cd, [alpha], [Mach])[1]
+    cl = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Mach, af.cl, [alpha*cosYAW^2], [Mach])[1]/cosYAW^2
+    cd = FLOWMath.interp2d(FLOWMath.akima, af.alpha, af.Mach, af.cd, [alpha*cosYAW],   [Mach])[1]/cosYAW
 
     return cl, cd
 end
@@ -442,9 +448,9 @@ function AlphaReMachAF(filenames::Matrix{String}; radians=true)
     return AlphaReMachAF(alpha, Re, Mach, cl, cd, info)
 end
 
-function afeval(af::AlphaReMachAF, alpha, Re, Mach)
-    cl = FLOWMath.interp3d(FLOWMath.akima, af.alpha, af.Re, af.Mach, af.cl, [alpha], [Re], [Mach])[1]
-    cd = FLOWMath.interp3d(FLOWMath.akima, af.alpha, af.Re, af.Mach, af.cd, [alpha], [Re], [Mach])[1]
+function afeval(af::AlphaReMachAF, alpha, Re, Mach; cosYAW=1.0)
+    cl = FLOWMath.interp3d(FLOWMath.akima, af.alpha, af.Re, af.Mach, af.cl, [alpha*cosYAW^2], [Re], [Mach])[1]/cosYAW^2
+    cd = FLOWMath.interp3d(FLOWMath.akima, af.alpha, af.Re, af.Mach, af.cd, [alpha*cosYAW],   [Re], [Mach])[1]/cosYAW
     
     return cl, cd
 end

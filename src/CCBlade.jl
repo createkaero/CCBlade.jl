@@ -92,7 +92,7 @@ function Base.getproperty(obj::AbstractVector{<:Section}, sym::Symbol)
 end # This is not always type stable b/c we don't know if the return type will be float or af function.
 
 """
-    OperatingPoint(Vx, Vy, rho; pitch=0.0, mu=1.0, asound=1.0)
+    OperatingPoint(Vx, Vy, Vr, rho; pitch=0.0, mu=1.0, asound=1.0)
 
 Operation point for a rotor.  
 The x direction is the axial direction, and y direction is the tangential direction in the rotor plane.  
@@ -102,14 +102,16 @@ See Documentation for more detail on coordinate systems.
 **Arguments**
 - `Vx::Float64`: velocity in x-direction along blade
 - `Vy::Float64`: velocity in y-direction along blade
-- `pitch::Float64`: pitch angle (radians)
+- `Vr::Float64`: velocity spanwise along blade
 - `rho::Float64`: fluid density
+- `pitch::Float64`: pitch angle (radians)
 - `mu::Float64`: fluid dynamic viscosity (unused if Re not included in airfoil data)
 - `asound::Float64`: fluid speed of sound (unused if Mach not included in airfoil data)
 """
 struct OperatingPoint{TF}
     Vx::TF
     Vy::TF
+    Vr::TF
     rho::TF
     pitch::TF  
     mu::TF
@@ -117,11 +119,11 @@ struct OperatingPoint{TF}
 end
 
 # promote to same type, e.g., duals
-OperatingPoint(Vx, Vy, rho, pitch, mu, asound) = OperatingPoint(promote(Vx, Vy, rho, pitch, mu, asound)...)
+OperatingPoint(Vx, Vy, Vr, rho, pitch, mu, asound) = OperatingPoint(promote(Vx, Vy, Vr, rho, pitch, mu, asound)...)
 
 
 # convenience constructor when Re and Mach are not used.
-OperatingPoint(Vx, Vy, rho; pitch=zero(rho), mu=one(rho), asound=one(rho)) = OperatingPoint(Vx, Vy, rho, pitch, mu, asound)
+OperatingPoint(Vx, Vy, Vr, rho; pitch=zero(rho), mu=one(rho), asound=one(rho)) = OperatingPoint(Vx, Vy, Vr, rho, pitch, mu, asound)
 
 # convenience function to access fields within an array of structs
 function Base.getproperty(obj::AbstractVector{<:OperatingPoint}, sym::Symbol)
@@ -130,13 +132,14 @@ end
 
 
 """
-    Outputs(Np, Tp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)
+    Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)
 
 Outputs from the BEM solver along the radius.
 
 **Arguments**
 - `Np::Float64`: normal force per unit length
 - `Tp::Float64`: tangential force per unit length
+- `Rp::Float64`: radial force per unit length
 - `a::Float64`: axial induction factor
 - `ap::Float64`: tangential induction factor
 - `u::Float64`: axial induced velocity
@@ -154,6 +157,7 @@ Outputs from the BEM solver along the radius.
 struct Outputs{TF}
     Np::TF
     Tp::TF
+    Rp::TF
     a::TF
     ap::TF
     u::TF
@@ -170,10 +174,10 @@ struct Outputs{TF}
 end
 
 # promote to same type, e.g., duals
-Outputs(Np, Tp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G) = Outputs(promote(Np, Tp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)...)
+Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G) = Outputs(promote(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)...)
 
 # convenience constructor to initialize
-Outputs() = Outputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+Outputs() = Outputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 # convenience function to access fields within an array of structs
 function Base.getproperty(obj::AbstractVector{<:Outputs}, sym::Symbol)
@@ -188,12 +192,33 @@ end
 # ------------ BEM core ------------------
 
 """
+    skewed_wake(psi, chi, r_R)
+
+Correction model for skewed wake.
+
+**Remarks**
+- Assumes rotorcraft convention for azimuthal position and wake skew.
+- Using Pitt-Peters (thrust only) linear inflow variation.
+
+**Arguments**
+- `psi::Float64`: azimuthal position (rad)
+- `chi::Float64`: rotor tilt angle -> atan(mu_x, mu_z + lambda_i)
+- `r_R::Float64`: radial position (-)
+
+**Returns**
+- `kw::Float64`: Correction factor for induced velocity (`u`) or induction factor (`a`).
+"""
+function skewed_wake(psi, chi, r_R)       
+    return (1 + 15π/32 * tan(chi/2.0) * r_R * cos(psi))
+end
+
+"""
 (private) residual function
 """
 function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section, op)
 
     # unpack inputs
-    r, chord, theta, Rhub, Rtip, Vx, Vy, rho, pitch, mu, asound = x  # variables
+    r, chord, theta, Rhub, Rtip, Vx, Vy, Vr, rho, pitch, mu, asound, psi, chi = x  # variables
     af, B, turbine, re_corr, mach_corr, rotation_corr, tip_corr = p  # parameters
     
     # constants
@@ -209,12 +234,18 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     Re = rho * W0 * chord / mu
     Mach = W0/asound  # also ignoring induction
 
-    # airfoil cl/cd
+    # Yawed flow correction
+    cosYAW = W0 / sqrt(Vx^2 + Vy^2 + Vr^2)
+    YAW    = acos(cosYAW)
+    cosYAW = FLOWMath.sigmoid_blend(cosYAW, 1.0, abs(alpha), pi/3, 0.25) # Correction washed out for AoAs approaching ±90°
+
+    # airfoil cl/cd (with yawed flow correction)
     if turbine
-        cl, cd = afeval(af, -alpha, Re, Mach)
+        cl, cd = afeval(af, -alpha, Re, Mach, cosYAW=cosYAW)
         cl *= -1
+
     else
-        cl, cd = afeval(af, alpha, Re, Mach)
+        cl, cd = afeval(af, alpha, Re, Mach, cosYAW=cosYAW)
     end
 
     # airfoil corrections
@@ -231,6 +262,7 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     # resolve into normal and tangential forces
     cn = cl*cphi - cd*sphi
     ct = cl*sphi + cd*cphi
+    cr = cd*tan(YAW)
 
     # hub/tip loss
     F = 1.0
@@ -239,13 +271,13 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     end
 
     # sec parameters
-    k = cn*sigma_p/(4.0*F*sphi*sphi)
+    k  = cn*sigma_p/(4.0*F*sphi*sphi)
     kp = ct*sigma_p/(4.0*F*sphi*cphi)
 
     # --- solve for induced velocities ------
     if isapprox(Vx, 0.0, atol=1e-6)
 
-        u = sign(phi)*kp*cn/ct*Vy
+        u = (sign(phi)*kp*cn/ct*Vy) * skewed_wake(psi, chi, r/Rtip)
         v = zero(phi)
         a = zero(phi)
         ap = zero(phi)
@@ -281,6 +313,7 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
             a = (g1 + sqrt(g2)) / g3
         end
 
+        a *= skewed_wake(psi, chi, r/Rtip)
         u = a * Vx
 
         # -------- tangential induction ----------
@@ -301,9 +334,10 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     end
 
     # ------- loads ---------
-    W = sqrt((Vx + u)^2 + (Vy - v)^2)
+    W  = sqrt((Vx + u)^2 + (Vy - v)^2)
     Np = cn*0.5*rho*W^2*chord
     Tp = ct*0.5*rho*W^2*chord
+    Rp = cr*0.5*rho*W^2*chord * sign(Vr)
 
     # The BEM methodology applies hub/tip losses to the loads rather than to the velocities.  
     # This is the most common way to implement a BEM, but it means that the raw velocities are misleading 
@@ -324,9 +358,9 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     v *= G
 
     if turbine
-        return R, Outputs(-Np, -Tp, -a, -ap, -u, -v, phi, -alpha, W, -cl, cd, -cn, -ct, F, G)
+        return R, Outputs(-Np, -Tp, -Rp, -a, -ap, -u, -v, phi, -alpha, W, -cl, cd, -cn, -ct, F, G)
     else
-        return R, Outputs(Np, Tp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)
+        return R, Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)
     end
 
 end
@@ -379,11 +413,13 @@ Solve the BEM equations for given rotor geometry and operating point.
 - `epsilon_everywhere::Bool = false`: if true, don't evaluate at intersections of `phi` quadrants (`pi/2`, `-pi/2`, etc.)
 - `implicitad_option=true`: if true, uses ImplicitAD to compute derivatives around solver when using AD; if false, bypasses ImplicitAD
 - `force_momentum::Bool = false`: if true, use momentum theory in vortex ring state and turbulent wake state (holds up until about Vc/Vh ≈ -1.5)
+- `psi::Float = 0.`: Azimuthal position based on rotorcraft conventions (psi = pi/2 for advancing blade) used for skewed wake correction.
+- `chi::Float = 0.`: Wake skew angle.
 
 **Returns**
 - `outputs::Outputs`: BEM output data including loads, induction factors, etc.
 """
-function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_everywhere=false, implicitad_option=true, force_momentum=false)
+function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_everywhere=false, implicitad_option=true, force_momentum=false, psi=0., chi=0.)
 
     # error handling
     if typeof(section) <: AbstractVector
@@ -475,7 +511,7 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
     residual(phi, x, p) = residual_and_outputs(phi, x, p; force_momentum)[1]
 
     # package up variables and parameters for residual
-    xv = [section.r, section.chord, section.theta, rotor.Rhub, rotor.Rtip, op.Vx, op.Vy, op.rho, op.pitch, op.mu, op.asound]
+    xv = [section.r, section.chord, section.theta, rotor.Rhub, rotor.Rtip, op.Vx, op.Vy, op.Vr, op.rho, op.pitch, op.mu, op.asound, psi, chi]
     pv = (section.af, rotor.B, rotor.turbine, rotor.re, rotor.mach, rotor.rotation, rotor.tip)
 
     success = false
@@ -556,8 +592,9 @@ function simple_op(Vinf, Omega, r, rho; pitch=zero(rho), mu=one(rho), asound=one
 
     Vx = Vinf * cos(precone) 
     Vy = Omega * r * cos(precone)
+    Vr = 0.0
 
-    return OperatingPoint(Vx, Vy, rho, pitch, mu, asound)
+    return OperatingPoint(Vx, Vy, Vr, rho, pitch, mu, asound)
 
 end
 
@@ -615,9 +652,10 @@ function windturbine_op(Vhub, Omega, pitch, r, precone, yaw, tilt, azimuth, hubH
     # total velocity
     Vx = Vwind_x + Vrot_x
     Vy = Vwind_y + Vrot_y
+    Vr = 0.0
 
     # operating point
-    return OperatingPoint(Vx, Vy, rho, pitch, mu, asound)
+    return OperatingPoint(Vx, Vy, Vr, rho, pitch, mu, asound)
 
 end
 
