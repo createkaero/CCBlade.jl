@@ -277,19 +277,19 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     # --- solve for induced velocities ------
     if isapprox(Vx, 0.0, atol=1e-6)
 
-        u = (sign(phi)*kp*cn/ct*Vy) * skewed_wake(psi, chi, r/Rtip)
-        v = zero(phi)
-        a = zero(phi)
+        u  = (sign(phi)*kp*cn/ct*Vy) * skewed_wake(psi, chi, r/Rtip)
+        v  = zero(phi)
+        a  = zero(phi)
         ap = zero(phi)
-        R = sign(phi) - k
+        R  = chi == 0. ? sign(phi) - k : (sphi/u) - (cphi/Vy)
 
     elseif isapprox(Vy, 0.0, atol=1e-6)
         
-        u = zero(phi)
-        v = k*ct/cn*abs(Vx)
-        a = zero(phi)
+        u  = zero(phi)
+        v  = k*ct/cn*abs(Vx)
+        a  = zero(phi)
         ap = zero(phi)
-        R = sign(Vx) + kp
+        R  = sign(Vx) + kp
     
     else
 
