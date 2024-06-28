@@ -132,7 +132,7 @@ end
 
 
 """
-    Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW)
+    Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, W0, cl, cd, cn, ct, F, G, kw, YAW)
 
 Outputs from the BEM solver along the radius.
 
@@ -147,6 +147,7 @@ Outputs from the BEM solver along the radius.
 - `phi::Float64`: inflow angle
 - `alpha::Float64`: angle of attack
 - `W::Float64`: inflow velocity
+- `W0::Float64`: inflow velocity w/o induction
 - `cl::Float64`: lift coefficient
 - `cd::Float64`: drag coefficient
 - `cn::Float64`: normal force coefficient
@@ -167,6 +168,7 @@ struct Outputs{TF}
     phi::TF
     alpha::TF
     W::TF
+    W0::TF
     cl::TF
     cd::TF
     cn::TF
@@ -178,10 +180,10 @@ struct Outputs{TF}
 end
 
 # promote to same type, e.g., duals
-Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW) = Outputs(promote(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW)...)
+Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, W0, cl, cd, cn, ct, F, G, kw, YAW) = Outputs(promote(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, W0, cl, cd, cn, ct, F, G, kw, YAW)...)
 
 # convenience constructor to initialize
-Outputs() = Outputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+Outputs() = Outputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 # convenience function to access fields within an array of structs
 function Base.getproperty(obj::AbstractVector{<:Outputs}, sym::Symbol)
@@ -365,9 +367,9 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     v *= G
 
     if turbine
-        return R, Outputs(-Np, -Tp, -Rp, -a, -ap, -u, -v, phi, -alpha, W, -cl, cd, -cn, -ct, F, G, kw, YAW)
+        return R, Outputs(-Np, -Tp, -Rp, -a, -ap, -u, -v, phi, -alpha, W, W0, -cl, cd, -cn, -ct, F, G, kw, YAW)
     else
-        return R, Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW)
+        return R, Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, W0, cl, cd, cn, ct, F, G, kw, YAW)
     end
 
 end
