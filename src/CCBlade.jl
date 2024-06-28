@@ -245,11 +245,11 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
 
     # airfoil cl/cd (with yawed flow correction)
     if turbine
-        cl, cd = afeval(af, -alpha, Re, Mach, cosYAW=cosYAW)
+        cl, cd = afeval(af, -alpha, Re, Mach, cosYAW)
         cl *= -1
 
     else
-        cl, cd = afeval(af, alpha, Re, Mach, cosYAW=cosYAW)
+        cl, cd = afeval(af, alpha, Re, Mach, cosYAW)
     end
 
     # airfoil corrections
