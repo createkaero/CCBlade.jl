@@ -558,6 +558,12 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
     # it will return empty outputs
     # alternatively, one could increase npts and try again
     
+    if npts <= 10
+        return solve(rotor, section, op, npts=25; forcebackwardsearch, epsilon_everywhere, implicitad_option, force_momentum, psi, chi)
+    elseif npts == 25
+        return solve(rotor, section, op, npts=26, forcebackwardsearch=~forcebackwardsearch; epsilon_everywhere, implicitad_option, force_momentum, psi, chi)
+    end
+    
     @warn "Invalid data (likely) for this section.  Zero loading assumed."
     return Outputs()
 end
