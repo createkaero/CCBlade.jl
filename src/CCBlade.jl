@@ -221,7 +221,7 @@ end
 """
 (private) residual function
 """
-function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section, op)
+function residual_and_outputs(phi, x, p; force_momentum=false, swirl=true)  #rotor, section, op)
 
     # unpack inputs
     r, chord, theta, Rhub, Rtip, Vx, Vy, Vr, rho, pitch, mu, asound, psi, chi = x  # variables
@@ -333,13 +333,17 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
         if isapprox(kp, -1.0, atol=1e-6)  # state corresopnds to Vy=0, return any nonzero residual
             return 1.0, Outputs()
         end
+        
+        if swirl
+            ap = kp/(1 + kp)
+            v  = ap * Vy
+            R  = sin(phi)/(1 + a) - Vx/Vy*cos(phi)/(1 - ap)
 
-        ap = kp/(1 + kp)
-        v = ap * Vy
-
-
-        # ------- residual function -------------
-        R = sin(phi)/(1 + a) - Vx/Vy*cos(phi)/(1 - ap)
+        else
+            ap = zero(phi)
+            v  = zero(phi)
+            R  = sin(phi)/(1 + a) - Vx/Vy*cos(phi)
+        end
     end
 
     # ------- loads ---------
@@ -417,6 +421,7 @@ Solve the BEM equations for given rotor geometry and operating point.
 - `rotor::Rotor`: rotor properties
 - `section::Section`: section properties
 - `op::OperatingPoint`: operating point
+- `swirl::Bool = true`: compute tangential induction factor or not
 - `npts::Int = 10`: number of discretization points for `phi` state variable, used to find bracket for residual solve
 - `forcebackwardsearch::Bool = false`: if true, force bracket search from high `phi` values to low, otherwise let `solve` decide
 - `epsilon_everywhere::Bool = false`: if true, don't evaluate at intersections of `phi` quadrants (`pi/2`, `-pi/2`, etc.)
@@ -428,7 +433,7 @@ Solve the BEM equations for given rotor geometry and operating point.
 **Returns**
 - `outputs::Outputs`: BEM output data including loads, induction factors, etc.
 """
-function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_everywhere=false, implicitad_option=true, force_momentum=false, psi=0., chi=0.)
+function solve(rotor, section, op; swirl=true, npts=swirl ? 10 : 100, forcebackwardsearch=swirl ? false : true, epsilon_everywhere=false, implicitad_option=true, force_momentum=false, psi=0., chi=0.)
 
     # error handling
     if typeof(section) <: AbstractVector
@@ -440,10 +445,8 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
         return Outputs()  # no loads at hub/tip
     end
 
-    # parameters
-    if force_momentum
-        epsilon_everywhere = true
-    end
+    # Override certain parameters
+    epsilon_everywhere = force_momentum ? true : epsilon_everywhere
 
     # unpack
     Vx = op.Vx
@@ -517,7 +520,7 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
 
     # ----- solve residual function ------
     # pull out first argument
-    residual(phi, x, p) = residual_and_outputs(phi, x, p; force_momentum)[1]
+    residual(phi, x, p) = residual_and_outputs(phi, x, p; force_momentum, swirl)[1]
 
     # package up variables and parameters for residual
     xv = [section.r, section.chord, section.theta, rotor.Rhub, rotor.Rtip, op.Vx, op.Vy, op.Vr, op.rho, op.pitch, op.mu, op.asound, psi, chi]
@@ -558,7 +561,7 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
             else
                 phistar = solve(xv, pv)
             end
-            _, outputs = residual_and_outputs(phistar, xv, pv; force_momentum)
+            _, outputs = residual_and_outputs(phistar, xv, pv; force_momentum, swirl)
             return outputs
         end    
     end    
@@ -567,10 +570,8 @@ function solve(rotor, section, op; npts=10, forcebackwardsearch=false, epsilon_e
     # it will return empty outputs
     # alternatively, one could increase npts and try again
     
-    if npts <= 10
-        return solve(rotor, section, op, npts=25; forcebackwardsearch, epsilon_everywhere, implicitad_option, force_momentum, psi, chi)
-    elseif npts == 25
-        return solve(rotor, section, op, npts=26, forcebackwardsearch=~forcebackwardsearch; epsilon_everywhere, implicitad_option, force_momentum, psi, chi)
+    if swirl # try w/o swirl
+        return solve(rotor, section, op, swirl=false, npts=100; forcebackwardsearch, epsilon_everywhere, implicitad_option, force_momentum, psi, chi)
     end
     
     @warn "Invalid data (likely) for this section.  Zero loading assumed."
