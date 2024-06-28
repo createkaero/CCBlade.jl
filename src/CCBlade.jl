@@ -132,7 +132,7 @@ end
 
 
 """
-    Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)
+    Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW)
 
 Outputs from the BEM solver along the radius.
 
@@ -153,6 +153,8 @@ Outputs from the BEM solver along the radius.
 - `ct::Float64`: tangential force coefficient
 - `F::Float64`: hub/tip loss correction
 - `G::Float64`: effective hub/tip loss correction for induced velocities: `u = Vx * a * G, v = Vy * ap * G`
+- `kw::Float64`: Correction factor for induced velocity (`u`) or induction factor (`a`).
+- `YAW::Float64`: yaw angle
 """
 struct Outputs{TF}
     Np::TF
@@ -171,13 +173,15 @@ struct Outputs{TF}
     ct::TF
     F::TF
     G::TF
+    kw::TF
+    YAW::TF
 end
 
 # promote to same type, e.g., duals
-Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G) = Outputs(promote(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)...)
+Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW) = Outputs(promote(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW)...)
 
 # convenience constructor to initialize
-Outputs() = Outputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+Outputs() = Outputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 # convenience function to access fields within an array of structs
 function Base.getproperty(obj::AbstractVector{<:Outputs}, sym::Symbol)
@@ -274,10 +278,13 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     k  = cn*sigma_p/(4.0*F*sphi*sphi)
     kp = ct*sigma_p/(4.0*F*sphi*cphi)
 
+    # Skewed wake linear variation
+    kw = skewed_wake(psi, chi, r/Rtip)
+
     # --- solve for induced velocities ------
     if isapprox(Vx, 0.0, atol=1e-6)
 
-        u  = (sign(phi)*kp*cn/ct*Vy) * skewed_wake(psi, chi, r/Rtip)
+        u  = (sign(phi)*kp*cn/ct*Vy) * kw
         v  = zero(phi)
         a  = zero(phi)
         ap = zero(phi)
@@ -313,7 +320,7 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
             a = (g1 + sqrt(g2)) / g3
         end
 
-        a *= skewed_wake(psi, chi, r/Rtip)
+        a *= kw
         u = a * Vx
 
         # -------- tangential induction ----------
@@ -358,9 +365,9 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
     v *= G
 
     if turbine
-        return R, Outputs(-Np, -Tp, -Rp, -a, -ap, -u, -v, phi, -alpha, W, -cl, cd, -cn, -ct, F, G)
+        return R, Outputs(-Np, -Tp, -Rp, -a, -ap, -u, -v, phi, -alpha, W, -cl, cd, -cn, -ct, F, G, kw, YAW)
     else
-        return R, Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G)
+        return R, Outputs(Np, Tp, Rp, a, ap, u, v, phi, alpha, W, cl, cd, cn, ct, F, G, kw, YAW)
     end
 
 end
