@@ -240,8 +240,8 @@ function residual_and_outputs(phi, x, p; force_momentum=false)  #rotor, section,
 
     # Yawed flow correction
     cosYAW = W0 / sqrt(Vx^2 + Vy^2 + Vr^2)
-    YAW    = acos(cosYAW)
     cosYAW = FLOWMath.sigmoid_blend(cosYAW, 1.0, abs(alpha), pi/3, 0.25) # Correction washed out for AoAs approaching ±90°
+    YAW    = acos(cosYAW)
 
     # airfoil cl/cd (with yawed flow correction)
     if turbine
