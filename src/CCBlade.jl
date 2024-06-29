@@ -574,7 +574,7 @@ function solve(rotor, section, op; swirl=true, npts=swirl ? 10 : 100, forcebackw
         return solve(rotor, section, op, swirl=false, npts=100; forcebackwardsearch, epsilon_everywhere, implicitad_option, force_momentum, psi, chi)
     end
     
-    @warn "Invalid data (likely) for this section.  Zero loading assumed."
+    @warn "Invalid data (likely) for this section.  Zero loading assumed." maxlog=10
     return Outputs()
 end
 
